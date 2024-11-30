@@ -3,25 +3,20 @@
 <head>
     <meta charset="UTF-8">
     <title>Responsive PDF Viewer</title>
-    
-    <!-- Enhanced mobile responsiveness -->
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=1.0, maximum-scale=2.0, user-scalable=yes">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=1.0, maximum-scale=5.0, user-scalable=yes">
     
     <style>
         html, body {
             margin: 0;
             padding: 0;
             height: 100%;
-            overflow: hidden;
-            touch-action: pan-y pinch-zoom;
+            overscroll-behavior: none;
         }
         #pdf-container {
             width: 100%;
             height: 100%;
-            margin: 0;
-            position: relative;
             background-color: #f4f4f4;
-            overscroll-behavior-y: contain;
+            overflow: hidden;
         }
         #pdf-render {
             width: 100%;
@@ -30,9 +25,8 @@
             align-items: center;
             overflow-y: auto;
             height: 100%;
-            padding: 10px 0;
-            user-select: none;
-            -webkit-user-select: none;
+            touch-action: pan-y pinch-zoom;
+            overscroll-behavior-y: none;
         }
         #pdf-render canvas {
             max-width: 100%;
@@ -42,11 +36,6 @@
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
             margin-bottom: 10px;
             touch-action: pinch-zoom;
-        }
-        @media screen and (max-width: 600px) {
-            #pdf-render canvas {
-                width: 95%; /* Slightly narrower on small screens */
-            }
         }
     </style>
 </head>
@@ -60,20 +49,58 @@
         class PDFViewer {
             constructor() {
                 this.pdfContainer = document.getElementById('pdf-render');
-                this.setupMobileZoomHandling();
+                this.pdfContainer.addEventListener('wheel', this.handleWheel.bind(this));
+                this.setupTouchHandling();
             }
 
-            setupMobileZoomHandling() {
-                // Improved touch and zoom handling
-                document.addEventListener('touchmove', (e) => {
-                    if (e.touches.length > 1) {
+            setupTouchHandling() {
+                let initialDistance = 0;
+                let initialScale = 1;
+                let currentScale = 1;
+
+                this.pdfContainer.addEventListener('touchstart', (e) => {
+                    if (e.touches.length === 2) {
+                        initialDistance = this.getTouchDistance(e.touches);
+                        initialScale = currentScale;
+                    }
+                });
+
+                this.pdfContainer.addEventListener('touchmove', (e) => {
+                    if (e.touches.length === 2) {
                         e.preventDefault();
+                        const currentDistance = this.getTouchDistance(e.touches);
+                        const scaleFactor = currentDistance / initialDistance;
+                        currentScale = Math.min(Math.max(initialScale * scaleFactor, 0.5), 5);
+                        this.applyScale(currentScale);
                     }
                 }, { passive: false });
+            }
 
-                document.addEventListener('dblclick', (e) => {
-                    e.preventDefault();
-                }, { passive: false });
+            getTouchDistance(touches) {
+                return Math.hypot(
+                    touches[0].pageX - touches[1].pageX,
+                    touches[0].pageY - touches[1].pageY
+                );
+            }
+
+            handleWheel(e) {
+                e.preventDefault();
+                const delta = e.deltaY;
+                const scaleChange = delta > 0 ? 0.9 : 1.1;
+                this.applyScale(this.getCurrentScale() * scaleChange);
+            }
+
+            applyScale(scale) {
+                const canvases = this.pdfContainer.querySelectorAll('canvas');
+                canvases.forEach(canvas => {
+                    canvas.style.transform = `scale(${scale})`;
+                    canvas.style.transformOrigin = 'center center';
+                });
+            }
+
+            getCurrentScale() {
+                const canvas = this.pdfContainer.querySelector('canvas');
+                return canvas ? parseFloat(canvas.style.transform.replace('scale(', '').replace(')', '') || 1) : 1;
             }
 
             async loadPDF(url) {
@@ -82,7 +109,6 @@
 
                     const pdfDocument = await pdfjsLib.getDocument(url).promise;
                     
-                    // Calculate optimal scale based on screen width
                     const screenWidth = window.innerWidth;
                     
                     for (let pageNum = 1; pageNum <= pdfDocument.numPages; pageNum++) {
@@ -101,7 +127,6 @@
                 const context = canvas.getContext('2d');
                 this.pdfContainer.appendChild(canvas);
 
-                // Dynamically calculate scale based on screen width
                 const viewport = page.getViewport({ scale: 1 });
                 const scale = screenWidth / viewport.width;
                 const scaledViewport = page.getViewport({ scale: Math.min(scale, 1.5) });
@@ -117,14 +142,13 @@
             }
         }
 
-        // Initialize PDF Viewer with dynamic scaling
+        // Initialize PDF Viewer
         const pdfViewer = new PDFViewer();
         pdfViewer.loadPDF('chalanatukheliba.pdf');
 
-        // Handling window resize for responsive scaling
+        // Handling window resize
         window.addEventListener('resize', () => {
-            // Reload PDF to re-adjust scale on resize
-            pdfViewer.pdfContainer.innerHTML = ''; // Clear existing pages
+            pdfViewer.pdfContainer.innerHTML = ''; 
             pdfViewer.loadPDF('chalanatukheliba.pdf');
         });
     </script>
