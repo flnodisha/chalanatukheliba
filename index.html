@@ -2,136 +2,92 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Simple PDF Viewer</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Scrollable PDF Viewer</title>
     <style>
-        body {
+        html, body {
             margin: 0;
-            overflow: hidden;
-            background-color: #525659;
-        }
-        #pdf-container {
-            width: 100%;
+            padding: 0;
             height: 100%;
             overflow: hidden;
-            position: relative;
         }
-        #pdf-canvas {
-            display: block;
+        #pdf-container {
+            width: 95%;
+            height: 100%;
             margin: 0 auto;
-            transform-origin: center center;
+            position: relative;
+            background-color: #525659;
+        }
+        #pdf-render {
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            overflow-y: auto;
+            height: 100%;
+            padding: 20px 0;
+        }
+        #pdf-render canvas {
+            max-width: 100%;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            margin-bottom: 10px;
         }
     </style>
 </head>
 <body>
     <div id="pdf-container">
-        <canvas id="pdf-canvas"></canvas>
+        <div id="pdf-render"></div>
     </div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
     <script>
-        class SimplePDFViewer {
+        class PDFViewer {
             constructor() {
-                this.canvas = document.getElementById('pdf-canvas');
-                this.context = this.canvas.getContext('2d');
-                this.pdfContainer = document.getElementById('pdf-container');
-                this.pdfDoc = null;
-                this.currentPage = 1;
-                this.scale = 1; // Default scale
-                this.minScale = 0.5;
-                this.maxScale = 3;
-                this.isPinching = false;
-                this.startDistance = 0;
-
-                this.bindEvents();
+                this.pdfContainer = document.getElementById('pdf-render');
             }
 
             async loadPDF(url) {
                 try {
+                    // Configure PDF.js
                     pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
-                    this.pdfDoc = await pdfjsLib.getDocument(url).promise;
-                    this.renderPage(this.currentPage);
+
+                    // Load PDF
+                    const pdfDocument = await pdfjsLib.getDocument(url).promise;
+                    
+                    // Render all pages
+                    for (let pageNum = 1; pageNum <= pdfDocument.numPages; pageNum++) {
+                        await this.renderPage(pdfDocument, pageNum);
+                    }
                 } catch (error) {
-                    console.error('Error loading PDF:', error);
+                    console.error('PDF Loading Error:', error);
+                    this.pdfContainer.innerHTML = `<p>Error loading PDF: ${error.message}</p>`;
                 }
             }
 
-            async renderPage(pageNumber) {
-                const page = await this.pdfDoc.getPage(pageNumber);
-                const viewport = page.getViewport({ scale: this.scale });
+            async renderPage(pdfDocument, pageNumber) {
+                const page = await pdfDocument.getPage(pageNumber);
+                
+                // Create canvas for page
+                const canvas = document.createElement('canvas');
+                const context = canvas.getContext('2d');
+                this.pdfContainer.appendChild(canvas);
 
-                // Fit the PDF to the container width
-                const containerWidth = this.pdfContainer.offsetWidth;
-                const scaleFactor = containerWidth / viewport.width;
-                this.scale = scaleFactor;
+                // Calculate viewport with default scale
+                const viewport = page.getViewport({ scale: 1.5 });
+                canvas.height = viewport.height;
+                canvas.width = viewport.width;
 
-                // Adjust canvas size
-                const scaledViewport = page.getViewport({ scale: this.scale });
-                this.canvas.width = scaledViewport.width;
-                this.canvas.height = scaledViewport.height;
-
-                // Render the page
+                // Render page on canvas
                 const renderContext = {
-                    canvasContext: this.context,
-                    viewport: scaledViewport,
+                    canvasContext: context,
+                    viewport: viewport
                 };
                 await page.render(renderContext);
             }
-
-            bindEvents() {
-                // Pinch Zoom
-                this.pdfContainer.addEventListener('touchstart', this.handleTouchStart.bind(this), { passive: false });
-                this.pdfContainer.addEventListener('touchmove', this.handleTouchMove.bind(this), { passive: false });
-
-                // Mouse Wheel Zoom
-                this.pdfContainer.addEventListener('wheel', this.handleMouseWheel.bind(this), { passive: false });
-            }
-
-            handleTouchStart(e) {
-                if (e.touches.length === 2) {
-                    this.isPinching = true;
-                    this.startDistance = this.getTouchDistance(e.touches);
-                }
-            }
-
-            handleTouchMove(e) {
-                if (this.isPinching && e.touches.length === 2) {
-                    e.preventDefault();
-                    const currentDistance = this.getTouchDistance(e.touches);
-                    const scaleFactor = currentDistance / this.startDistance;
-
-                    const newScale = Math.min(Math.max(this.scale * scaleFactor, this.minScale), this.maxScale);
-                    if (newScale !== this.scale) {
-                        this.scale = newScale;
-                        this.renderPage(this.currentPage);
-                        this.startDistance = currentDistance;
-                    }
-                }
-            }
-
-            handleMouseWheel(e) {
-                if (e.ctrlKey || e.metaKey) {
-                    e.preventDefault();
-                    const scaleFactor = e.deltaY > 0 ? 0.9 : 1.1;
-                    const newScale = Math.min(Math.max(this.scale * scaleFactor, this.minScale), this.maxScale);
-                    if (newScale !== this.scale) {
-                        this.scale = newScale;
-                        this.renderPage(this.currentPage);
-                    }
-                }
-            }
-
-            getTouchDistance(touches) {
-                return Math.hypot(
-                    touches[0].pageX - touches[1].pageX,
-                    touches[0].pageY - touches[1].pageY
-                );
-            }
         }
 
-        // Initialize viewer and load PDF
-        const viewer = new SimplePDFViewer();
-        viewer.loadPDF('chalanatukheliba.pdf'); // Replace 'sample.pdf' with your PDF file path
+        // Initialize PDF Viewer
+        const pdfViewer = new PDFViewer();
+        pdfViewer.loadPDF('chalanatukheliba.pdf');
     </script>
 </body>
 </html>
