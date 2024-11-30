@@ -2,103 +2,110 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Zoomable & Draggable PDF Viewer</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simple PDF Viewer</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <style>
-        html, body {
+        body {
             margin: 0;
-            padding: 0;
-            height: 100%;
             overflow: hidden;
+            background-color: #525659;
         }
         #pdf-container {
             width: 100%;
             height: 100%;
+            overflow: hidden;
             position: relative;
-            background-color: #525659;
-            overflow: auto;
-            touch-action: none;
         }
-        #pdf-render {
-            position: relative;
-            width: auto;
-            height: auto;
-            display: flex;
-            flex-direction: column;
-            align-items: flex-start;
-            padding: 10px;
-            transform-origin: top left;
-        }
-        #pdf-render canvas {
-            margin-bottom: 10px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        #pdf-canvas {
+            display: block;
+            margin: 0 auto;
+            transform-origin: center center;
         }
     </style>
 </head>
 <body>
     <div id="pdf-container">
-        <div id="pdf-render"></div>
+        <canvas id="pdf-canvas"></canvas>
     </div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
     <script>
-        class PDFViewer {
+        class SimplePDFViewer {
             constructor() {
+                this.canvas = document.getElementById('pdf-canvas');
+                this.context = this.canvas.getContext('2d');
                 this.pdfContainer = document.getElementById('pdf-container');
-                this.pdfRender = document.getElementById('pdf-render');
-                this.scale = 1;
-                this.initialDistance = 0;
-                this.offsetX = 0;
-                this.offsetY = 0;
+                this.pdfDoc = null;
+                this.currentPage = 1;
+                this.scale = 1; // Default scale
+                this.minScale = 0.5;
+                this.maxScale = 3;
+                this.isPinching = false;
+                this.startDistance = 0;
 
                 this.bindEvents();
             }
 
+            async loadPDF(url) {
+                try {
+                    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
+                    this.pdfDoc = await pdfjsLib.getDocument(url).promise;
+                    this.renderPage(this.currentPage);
+                } catch (error) {
+                    console.error('Error loading PDF:', error);
+                }
+            }
+
+            async renderPage(pageNumber) {
+                const page = await this.pdfDoc.getPage(pageNumber);
+                const viewport = page.getViewport({ scale: this.scale });
+
+                // Fit the PDF to the container width
+                const containerWidth = this.pdfContainer.offsetWidth;
+                const scaleFactor = containerWidth / viewport.width;
+                this.scale = scaleFactor;
+
+                // Adjust canvas size
+                const scaledViewport = page.getViewport({ scale: this.scale });
+                this.canvas.width = scaledViewport.width;
+                this.canvas.height = scaledViewport.height;
+
+                // Render the page
+                const renderContext = {
+                    canvasContext: this.context,
+                    viewport: scaledViewport,
+                };
+                await page.render(renderContext);
+            }
+
             bindEvents() {
-                // Pinch Zoom for Mobile Devices
+                // Pinch Zoom
                 this.pdfContainer.addEventListener('touchstart', this.handleTouchStart.bind(this), { passive: false });
                 this.pdfContainer.addEventListener('touchmove', this.handleTouchMove.bind(this), { passive: false });
 
-                // Mouse Wheel Zoom for Desktop
+                // Mouse Wheel Zoom
                 this.pdfContainer.addEventListener('wheel', this.handleMouseWheel.bind(this), { passive: false });
-
-                // Drag to Pan (Mouse)
-                this.pdfContainer.addEventListener('mousedown', this.handleDragStart.bind(this));
-                this.pdfContainer.addEventListener('mousemove', this.handleDragMove.bind(this));
-                this.pdfContainer.addEventListener('mouseup', this.handleDragEnd.bind(this));
-                this.pdfContainer.addEventListener('mouseleave', this.handleDragEnd.bind(this));
-
-                // Drag to Pan (Touch)
-                this.pdfContainer.addEventListener('touchstart', this.handleDragStart.bind(this), { passive: false });
-                this.pdfContainer.addEventListener('touchmove', this.handleDragMove.bind(this), { passive: false });
-                this.pdfContainer.addEventListener('touchend', this.handleDragEnd.bind(this));
             }
 
             handleTouchStart(e) {
                 if (e.touches.length === 2) {
-                    this.initialDistance = this.getDistanceBetweenTouches(e.touches);
-                } else if (e.touches.length === 1) {
-                    this.isDragging = true;
-                    this.startX = e.touches[0].clientX - this.offsetX;
-                    this.startY = e.touches[0].clientY - this.offsetY;
+                    this.isPinching = true;
+                    this.startDistance = this.getTouchDistance(e.touches);
                 }
             }
 
             handleTouchMove(e) {
-                if (e.touches.length === 2) {
+                if (this.isPinching && e.touches.length === 2) {
                     e.preventDefault();
-                    const currentDistance = this.getDistanceBetweenTouches(e.touches);
-                    const scaleFactor = currentDistance / this.initialDistance;
+                    const currentDistance = this.getTouchDistance(e.touches);
+                    const scaleFactor = currentDistance / this.startDistance;
 
-                    const newScale = Math.min(Math.max(this.scale * scaleFactor, 0.5), 3);
-                    this.updateCanvasScale(newScale);
-
-                    this.initialDistance = currentDistance;
-                } else if (this.isDragging && e.touches.length === 1) {
-                    e.preventDefault();
-                    this.offsetX = e.touches[0].clientX - this.startX;
-                    this.offsetY = e.touches[0].clientY - this.startY;
-                    this.updateCanvasOffset();
+                    const newScale = Math.min(Math.max(this.scale * scaleFactor, this.minScale), this.maxScale);
+                    if (newScale !== this.scale) {
+                        this.scale = newScale;
+                        this.renderPage(this.currentPage);
+                        this.startDistance = currentDistance;
+                    }
                 }
             }
 
@@ -106,81 +113,25 @@
                 if (e.ctrlKey || e.metaKey) {
                     e.preventDefault();
                     const scaleFactor = e.deltaY > 0 ? 0.9 : 1.1;
-                    const newScale = Math.min(Math.max(this.scale * scaleFactor, 0.5), 3);
-                    this.updateCanvasScale(newScale);
+                    const newScale = Math.min(Math.max(this.scale * scaleFactor, this.minScale), this.maxScale);
+                    if (newScale !== this.scale) {
+                        this.scale = newScale;
+                        this.renderPage(this.currentPage);
+                    }
                 }
             }
 
-            handleDragStart(e) {
-                this.isDragging = true;
-                this.startX = e.clientX - this.offsetX;
-                this.startY = e.clientY - this.offsetY;
-            }
-
-            handleDragMove(e) {
-                if (this.isDragging) {
-                    e.preventDefault();
-                    this.offsetX = e.clientX - this.startX;
-                    this.offsetY = e.clientY - this.startY;
-                    this.updateCanvasOffset();
-                }
-            }
-
-            handleDragEnd() {
-                this.isDragging = false;
-            }
-
-            getDistanceBetweenTouches(touches) {
+            getTouchDistance(touches) {
                 return Math.hypot(
                     touches[0].pageX - touches[1].pageX,
                     touches[0].pageY - touches[1].pageY
                 );
             }
-
-            updateCanvasScale(newScale) {
-                this.scale = newScale;
-                this.pdfRender.style.transform = `scale(${this.scale})`;
-                this.updateCanvasOffset();
-            }
-
-            updateCanvasOffset() {
-                this.pdfRender.style.transform = `scale(${this.scale}) translate(${this.offsetX / this.scale}px, ${this.offsetY / this.scale}px)`;
-            }
-
-            async loadPDF(url) {
-                try {
-                    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
-                    const pdfDocument = await pdfjsLib.getDocument(url).promise;
-
-                    for (let pageNum = 1; pageNum <= pdfDocument.numPages; pageNum++) {
-                        await this.renderPage(pdfDocument, pageNum);
-                    }
-                } catch (error) {
-                    console.error('PDF Loading Error:', error);
-                    this.pdfRender.innerHTML = `<p>Error loading PDF: ${error.message}</p>`;
-                }
-            }
-
-            async renderPage(pdfDocument, pageNumber) {
-                const page = await pdfDocument.getPage(pageNumber);
-                const canvas = document.createElement('canvas');
-                const context = canvas.getContext('2d');
-                this.pdfRender.appendChild(canvas);
-
-                const viewport = page.getViewport({ scale: this.scale });
-                canvas.height = viewport.height;
-                canvas.width = viewport.width;
-
-                const renderContext = {
-                    canvasContext: context,
-                    viewport: viewport
-                };
-                await page.render(renderContext);
-            }
         }
 
-        const pdfViewer = new PDFViewer();
-        pdfViewer.loadPDF('chalanatukheliba.pdf');
+        // Initialize viewer and load PDF
+        const viewer = new SimplePDFViewer();
+        viewer.loadPDF('chalanatukheliba.pdf'); // Replace 'sample.pdf' with your PDF file path
     </script>
 </body>
 </html>
