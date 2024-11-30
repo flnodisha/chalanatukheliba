@@ -2,95 +2,125 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Responsive PDF Viewer</title>
+    <title>Mobile PDF Viewer</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=1.0, maximum-scale=5.0, user-scalable=yes">
     
     <style>
+        * {
+            -webkit-tap-highlight-color: transparent;
+            -webkit-touch-callout: none;
+            -webkit-user-select: none;
+            user-select: none;
+        }
         html, body {
             margin: 0;
             padding: 0;
             height: 100%;
             overscroll-behavior: none;
+            touch-action: none;
         }
         #pdf-container {
             width: 100%;
             height: 100%;
             background-color: #f4f4f4;
             overflow: hidden;
+            position: relative;
         }
         #pdf-render {
             width: 100%;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            overflow-y: auto;
             height: 100%;
+            overflow: auto;
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
             touch-action: pan-y pinch-zoom;
-            overscroll-behavior-y: none;
         }
         #pdf-render canvas {
+            display: block;
             max-width: 100%;
-            width: auto;
+            width: 100%;
             height: auto;
-            object-fit: contain;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-            margin-bottom: 10px;
-            touch-action: pinch-zoom;
+            margin: 0 auto;
+            transition: transform 0.1s;
+        }
+        #loading-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.5);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            color: white;
+            z-index: 1000;
+            display: none;
         }
     </style>
 </head>
 <body>
+    <div id="loading-overlay">Loading PDF...</div>
     <div id="pdf-container">
         <div id="pdf-render"></div>
     </div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
     <script>
-        class PDFViewer {
+        class MobilePDFViewer {
             constructor() {
                 this.pdfContainer = document.getElementById('pdf-render');
-                this.pdfContainer.addEventListener('wheel', this.handleWheel.bind(this));
-                this.setupTouchHandling();
+                this.loadingOverlay = document.getElementById('loading-overlay');
+                this.initializePinchZoom();
             }
 
-            setupTouchHandling() {
-                let initialDistance = 0;
+            initializePinchZoom() {
+                let startDistance = 0;
                 let initialScale = 1;
                 let currentScale = 1;
 
                 this.pdfContainer.addEventListener('touchstart', (e) => {
                     if (e.touches.length === 2) {
-                        initialDistance = this.getTouchDistance(e.touches);
+                        // Pinch start
+                        startDistance = this.calculateTouchDistance(e.touches);
                         initialScale = currentScale;
                     }
-                });
+                }, { passive: false });
 
                 this.pdfContainer.addEventListener('touchmove', (e) => {
                     if (e.touches.length === 2) {
-                        e.preventDefault();
-                        const currentDistance = this.getTouchDistance(e.touches);
-                        const scaleFactor = currentDistance / initialDistance;
+                        e.preventDefault(); // Prevent default scroll/zoom
+
+                        // Calculate pinch zoom
+                        const currentDistance = this.calculateTouchDistance(e.touches);
+                        const scaleFactor = currentDistance / startDistance;
+                        
+                        // Update scale with limits
                         currentScale = Math.min(Math.max(initialScale * scaleFactor, 0.5), 5);
-                        this.applyScale(currentScale);
+                        
+                        // Apply scale to all canvases
+                        this.applyZoom(currentScale);
+                    }
+                }, { passive: false });
+
+                // Prevent default touch behaviors
+                this.pdfContainer.addEventListener('touchstart', (e) => {
+                    if (e.touches.length > 1) {
+                        e.preventDefault();
                     }
                 }, { passive: false });
             }
 
-            getTouchDistance(touches) {
+            calculateTouchDistance(touches) {
                 return Math.hypot(
                     touches[0].pageX - touches[1].pageX,
                     touches[0].pageY - touches[1].pageY
                 );
             }
 
-            handleWheel(e) {
-                e.preventDefault();
-                const delta = e.deltaY;
-                const scaleChange = delta > 0 ? 0.9 : 1.1;
-                this.applyScale(this.getCurrentScale() * scaleChange);
-            }
-
-            applyScale(scale) {
+            applyZoom(scale) {
                 const canvases = this.pdfContainer.querySelectorAll('canvas');
                 canvases.forEach(canvas => {
                     canvas.style.transform = `scale(${scale})`;
@@ -98,42 +128,54 @@
                 });
             }
 
-            getCurrentScale() {
-                const canvas = this.pdfContainer.querySelector('canvas');
-                return canvas ? parseFloat(canvas.style.transform.replace('scale(', '').replace(')', '') || 1) : 1;
-            }
-
             async loadPDF(url) {
                 try {
+                    // Show loading overlay
+                    this.loadingOverlay.style.display = 'flex';
+
+                    // Configure PDF.js
                     pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
 
+                    // Load PDF
                     const pdfDocument = await pdfjsLib.getDocument(url).promise;
                     
+                    // Clear previous pages
+                    this.pdfContainer.innerHTML = '';
+
+                    // Calculate optimal scale
                     const screenWidth = window.innerWidth;
                     
+                    // Render all pages
                     for (let pageNum = 1; pageNum <= pdfDocument.numPages; pageNum++) {
                         await this.renderPage(pdfDocument, pageNum, screenWidth);
                     }
+
+                    // Hide loading overlay
+                    this.loadingOverlay.style.display = 'none';
                 } catch (error) {
                     console.error('PDF Loading Error:', error);
-                    this.pdfContainer.innerHTML = `<p>Error loading PDF: ${error.message}</p>`;
+                    this.loadingOverlay.innerHTML = `Error loading PDF: ${error.message}`;
                 }
             }
 
             async renderPage(pdfDocument, pageNumber, screenWidth) {
                 const page = await pdfDocument.getPage(pageNumber);
                 
+                // Create canvas for page
                 const canvas = document.createElement('canvas');
                 const context = canvas.getContext('2d');
                 this.pdfContainer.appendChild(canvas);
 
+                // Calculate viewport with dynamic scale
                 const viewport = page.getViewport({ scale: 1 });
                 const scale = screenWidth / viewport.width;
                 const scaledViewport = page.getViewport({ scale: Math.min(scale, 1.5) });
 
+                // Set canvas dimensions
                 canvas.height = scaledViewport.height;
                 canvas.width = scaledViewport.width;
 
+                // Render page on canvas
                 const renderContext = {
                     canvasContext: context,
                     viewport: scaledViewport
@@ -143,12 +185,11 @@
         }
 
         // Initialize PDF Viewer
-        const pdfViewer = new PDFViewer();
+        const pdfViewer = new MobilePDFViewer();
         pdfViewer.loadPDF('chalanatukheliba.pdf');
 
         // Handling window resize
         window.addEventListener('resize', () => {
-            pdfViewer.pdfContainer.innerHTML = ''; 
             pdfViewer.loadPDF('chalanatukheliba.pdf');
         });
     </script>
